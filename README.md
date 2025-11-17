@@ -5,7 +5,7 @@ Find your perfect ring size in ~30 seconds using AI, then preview styles and try
 Features
 - AI measurement with camera guidance and orientation fixes
 - Optional AR try‑on using layered PNGs (band + gem)
-- “Styles for You” gallery sourced from `public/assets/rings/<slug>/<id>_RING.png`
+- “Styles for You” gallery sourced
 - Per‑landmark Kalman + EMA smoothing for stable tracking
 - Vitest unit tests for tracking filters
 
