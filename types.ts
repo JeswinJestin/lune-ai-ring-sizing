@@ -19,6 +19,14 @@ export interface CalibrationResult {
 
 export interface MeasurementResult extends CalibrationResult {
   ringSize: RingSize;
+  zones?: Array<{
+    name: string;
+    width_mm: number;
+    circumference_mm: number;
+    confidence: number;
+    error_mm: number;
+    points?: Array<{ x: number; y: number }>;
+  }>;
 }
 
 export type Landmark = {
@@ -62,6 +70,21 @@ export interface AnalysisResult {
         pixelToMmRatio?: number;
         fingerWidthPx: number;
         referenceObject?: ReferenceObject['type'];
+        handedness?: 'Left' | 'Right';
+        palmCoveragePct?: number;
+        exclusions?: { nailExcluded: boolean };
+    };
+    zones?: Array<{
+        name: string;
+        width_mm: number;
+        circumference_mm: number;
+        confidence: number;
+        error_mm: number;
+        points?: Array<{ x: number; y: number }>;
+    }>;
+    visualization?: {
+        points?: Array<{ x: number; y: number }>;
+        lines?: Array<{ x1: number; y1: number; x2: number; y2: number }>;
     };
 }
 
@@ -72,4 +95,5 @@ export interface CameraGuidance {
   fingerDetected: boolean;
   distance: 'good' | 'closer' | 'back';
   message: string;
+  objectBox?: BoundingBox;
 }

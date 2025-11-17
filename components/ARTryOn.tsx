@@ -58,10 +58,17 @@ export const ARTryOn = ({ result, onBack }: ARTryOnProps) => {
   // State for user adjustments
   const [positionOffset, setPositionOffset] = useState({ x: 0, y: 0 });
   const [rotation, setRotation] = useState(0);
+  const rotationEmaRef = useRef<number>(0);
+  const [isPalmFacing, setIsPalmFacing] = useState<boolean>(false);
   const [zoom, setZoom] = useState(1);
   const [showAdjustments, setShowAdjustments] = useState(false);
   const [savedSettings, setSavedSettings] = useState<Record<number, RingSettings>>({});
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving'>('idle');
+  const [gemClipPath, setGemClipPath] = useState<string | null>(null);
+  const [gemOpacity, setGemOpacity] = useState<number>(1);
+  const ringContainerRef = useRef<HTMLDivElement>(null);
+  const gemImgRef = useRef<HTMLImageElement>(null);
+  const ringSizeRef = useRef<number | null>(null);
 
   // State for swipe-to-dismiss gesture
   const [touchStartY, setTouchStartY] = useState(0);
@@ -76,6 +83,7 @@ export const ARTryOn = ({ result, onBack }: ARTryOnProps) => {
     if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0 && videoRef.current) {
         setIsHandDetected(true);
         const landmarks = results.multiHandLandmarks[0];
+        const handed = (results.multiHandedness && results.multiHandedness[0] && results.multiHandedness[0].label) || 'Unknown';
         const video = videoRef.current;
         const cs = getComputedStyle(video);
         const mirrored = cs.transform && cs.transform.includes('matrix') ? parseFloat(cs.transform.split('(')[1].split(',')[0]) < 0 : true;
@@ -88,20 +96,82 @@ export const ARTryOn = ({ result, onBack }: ARTryOnProps) => {
         if (palmWidthInPixels > 0) {
             const livePixelsPerMm = (palmWidthInPixels * video.clientWidth) / AVG_PALM_WIDTH_MM;
             const newRingSizePx = resultRef.current.fingerDiameter_mm * livePixelsPerMm;
-            setDynamicRingSize(newRingSizePx);
+            ringSizeRef.current = newRingSizePx;
+            if (ringContainerRef.current) {
+              const size = (newRingSizePx ?? 0) || 0;
+              if (size > 0) {
+                ringContainerRef.current.style.width = `${size}px`;
+                ringContainerRef.current.style.height = `${size}px`;
+              }
+            }
         }
 
-        const fingerBase = landmarks[13];
+        const RING_MCP = landmarks[13];
+        const RING_PIP = landmarks[14];
+        const RING_DIP = landmarks[15];
+        const RING_TIP = landmarks[16];
         const videoWidth = video.clientWidth;
         const videoHeight = video.clientHeight;
         
-        const x = tx(fingerBase.x) * videoWidth;
-        const y = fingerBase.y * videoHeight;
-        setRingPosition({ x, y });
+        const cx = tx(((RING_PIP.x + RING_DIP.x) / 2)) * videoWidth;
+        const cy = ((RING_PIP.y + RING_DIP.y) / 2) * videoHeight;
+        if (!ringPosition) setRingPosition({ x: cx, y: cy });
+        if (ringContainerRef.current) {
+          ringContainerRef.current.style.top = `${cy + positionOffset.y}px`;
+          ringContainerRef.current.style.left = `${cx + positionOffset.x}px`;
+        }
+
+        const dx = (tx(RING_TIP.x) - tx(RING_MCP.x)) * videoWidth;
+        const dy = (RING_TIP.y - RING_MCP.y) * videoHeight;
+        const angleDeg = Math.atan2(dy, dx) * 180 / Math.PI;
+        const desiredRotation = angleDeg + 90; // band perpendicular to finger axis
+        const ema = rotationEmaRef.current * 0.7 + desiredRotation * 0.3;
+        rotationEmaRef.current = ema;
+        if (ringContainerRef.current) {
+          const rot = ema + rotation;
+          ringContainerRef.current.style.transform = `translate(-50%, -50%) rotate(${rot}deg)`;
+        }
+
+        const palmZAvg = (landmarks[0].z + landmarks[5].z + landmarks[9].z + landmarks[13].z + landmarks[17].z) / 5;
+        const tipZAvg = (landmarks[4].z + landmarks[8].z + landmarks[12].z + landmarks[16].z + landmarks[20].z) / 5;
+        const palmFacing = palmZAvg < tipZAvg;
+        setIsPalmFacing(palmFacing);
+
+        const pixDist2D = (a: any, b: any) => Math.hypot((tx(a.x) - tx(b.x)) * videoWidth, (a.y - b.y) * videoHeight);
+        const fingerWidthPx = pixDist2D(RING_PIP, RING_DIP) * 0.78;
+        const axisLen = Math.hypot(dx, dy) || 1;
+        const ux = dx / axisLen; // along finger
+        const uy = dy / axisLen;
+        const pxv = { x: -uy, y: ux }; // perpendicular unit
+        const halfW = Math.max(4, fingerWidthPx / 2);
+        const p1 = { x: cx + pxv.x * halfW, y: cy + pxv.y * halfW };
+        const p2 = { x: cx - pxv.x * halfW, y: cy - pxv.y * halfW };
+        const occlLength = Math.max(halfW * 1.4, fingerWidthPx);
+        const p3 = { x: p2.x + ux * occlLength, y: p2.y + uy * occlLength };
+        const p4 = { x: p1.x + ux * occlLength, y: p1.y + uy * occlLength };
+
+        const clip = `polygon(${p1.x}px ${p1.y}px, ${p2.x}px ${p2.y}px, ${p3.x}px ${p3.y}px, ${p4.x}px ${p4.y}px)`;
+        if (gemImgRef.current) {
+          if (palmFacing) {
+            gemImgRef.current.style.opacity = '0';
+          } else {
+            const depthDelta = tipZAvg - palmZAvg;
+            const vis = Math.max(0.25, Math.min(1.0, 0.5 + depthDelta * 1.5));
+            gemImgRef.current.style.opacity = `${vis}`;
+          }
+          gemImgRef.current.style.clipPath = clip;
+          const light = Math.max(0.85, Math.min(1.15, 1.0 + (tipZAvg - palmZAvg) * 0.6));
+          gemImgRef.current.style.filter = `drop-shadow(0 3px 6px rgba(0,0,0,0.4)) saturate(1.05) brightness(${light})`;
+        }
         
     } else {
         setIsHandDetected(false);
         setRingPosition(null);
+        if (gemImgRef.current) {
+          gemImgRef.current.style.clipPath = '';
+          gemImgRef.current.style.opacity = '1';
+          gemImgRef.current.style.filter = 'drop-shadow(0 3px 6px rgba(0,0,0,0.4)) saturate(1.05)';
+        }
     }
   }, []);
   
@@ -346,7 +416,8 @@ export const ARTryOn = ({ result, onBack }: ARTryOnProps) => {
       
       {selectedRing && ringPosition && (
         <div 
-          className="absolute pointer-events-none flex items-center justify-center transition-all duration-100 ease-linear"
+          ref={ringContainerRef}
+          className="absolute pointer-events-none flex items-center justify-center transition-transform duration-50 ease-linear will-change-transform contain-layout"
           style={{ 
             width: `${finalRingSize}px`, 
             height: `${finalRingSize}px`,
@@ -355,8 +426,18 @@ export const ARTryOn = ({ result, onBack }: ARTryOnProps) => {
             transform: `translate(-50%, -50%) rotate(${rotation}deg)`
           }}
         >
-            <img src={selectedRing.layers.band} alt={selectedRing.name} className="absolute inset-0 w-full h-full" />
-            <img src={selectedRing.layers.gem} alt={selectedRing.name} className="absolute inset-0 w-full h-full" />
+            <img src={selectedRing.layers.band} alt={selectedRing.name} className="absolute inset-0 w-full h-full" style={{ filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.35))' }} />
+            <img 
+              ref={gemImgRef}
+              src={selectedRing.layers.gem} 
+              alt={selectedRing.name} 
+              className="absolute inset-0 w-full h-full"
+              style={{ 
+                opacity: gemOpacity, 
+                clipPath: gemClipPath || undefined, 
+                filter: 'drop-shadow(0 3px 6px rgba(0,0,0,0.4)) saturate(1.05)'
+              }} 
+            />
             <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-[10px] text-silver-300 bg-black/40 px-2 py-1 rounded">
               {Math.round((selectedRing.targetCoveragePct ?? 80))}% coverage · ≥{(selectedRing.minThickness_mm ?? 2).toFixed(1)}mm
             </div>

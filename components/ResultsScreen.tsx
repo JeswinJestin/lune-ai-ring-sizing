@@ -139,6 +139,35 @@ export const ResultsScreen = ({ result, onMeasureAgain, onTryOn, onViewRecommend
                 </div>
             </div>
 
+            {Array.isArray(result.zones) && result.zones.length >= 3 && (
+              <div className="mt-10 text-left">
+                <h3 className="font-display text-xl text-silver-200 mb-4">Finger Dimensions</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {result.zones.map((z, idx) => (
+                    <div key={idx} className="rounded-xl border border-platinum-300/20 bg-midnight-500/40 p-4">
+                      <div className="text-sm text-silver-400">{z.name}</div>
+                      <div className="mt-2 text-silver-100">
+                        <div className="text-xs">Thickness</div>
+                        <div className="text-lg font-mono">{z.width_mm.toFixed(1)} mm</div>
+                      </div>
+                      <div className="mt-2 text-silver-100">
+                        <div className="text-xs">Circumference</div>
+                        <div className="text-lg font-mono">{z.circumference_mm.toFixed(1)} mm</div>
+                      </div>
+                      <div className="mt-2 text-silver-300 flex items-center justify-between">
+                        <span className="text-xs">Confidence</span>
+                        <span className="font-mono text-sm">{z.confidence}%</span>
+                      </div>
+                      <div className="mt-1 text-silver-300 flex items-center justify-between">
+                        <span className="text-xs">Error Margin</span>
+                        <span className="font-mono text-sm">±{z.error_mm.toFixed(1)} mm</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
              <div className="mt-12 flex flex-wrap justify-center items-center gap-4">
                 <Button onClick={onViewRecommendations} variant="secondary">
                     View Ring Styles

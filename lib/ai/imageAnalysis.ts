@@ -1,7 +1,7 @@
 
 import { GoogleGenAI } from "@google/genai";
-import type { AnalysisResult } from '../../types';
-import { calculateRingSizeFromAI } from './sizeCalculation';
+import type { AnalysisResult, Landmark } from '../../types';
+import { calculateRingSizeFromAI, calculateRingSizeFromLandmarks } from './sizeCalculation';
 import { diameterToSize } from '../sizeConversion';
 import { IMAGE_ANALYSIS_PROMPT, RESPONSE_JSON_SCHEMA } from "./prompts";
 
@@ -16,14 +16,52 @@ export const analyzeImage = async (
     imageBlob: Blob,
 ): Promise<AnalysisResult> => {
     const canCallGemini = typeof process.env.API_KEY === 'string' && process.env.API_KEY.length > 0 && location.protocol === 'https:';
-    if (!canCallGemini) {
-        const fallbackSize = diameterToSize(18.1);
-        return {
-            size: fallbackSize!,
-            confidence: 30,
-            method: 'no_reference_fallback',
-            debugInfo: { fingerWidthPx: 0 }
+    const tryLandmarksFallback = async (): Promise<AnalysisResult | null> => {
+        const Hands: any = (window as any).Hands;
+        if (!Hands) return null;
+        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+            const el = new Image();
+            const url = URL.createObjectURL(imageBlob);
+            el.onload = () => resolve(el);
+            el.onerror = reject;
+            el.src = url;
+        });
+        const offscreen = document.createElement('canvas');
+        const maxW = 640;
+        const aspect = img.naturalHeight / img.naturalWidth;
+        offscreen.width = Math.min(maxW, img.naturalWidth);
+        offscreen.height = Math.round(offscreen.width * aspect);
+        const octx = offscreen.getContext('2d');
+        if (!octx) { URL.revokeObjectURL(img.src); return null; }
+        octx.filter = 'contrast(1.1) saturate(1.05) brightness(1.04)';
+        octx.drawImage(img, 0, 0, offscreen.width, offscreen.height);
+        const hands = new Hands({ locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+        const detect = async (complexity: 1 | 2): Promise<Landmark[] | null> => {
+            hands.setOptions({ maxNumHands: 1, modelComplexity: complexity, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+            return new Promise<Landmark[] | null>(async (resolve) => {
+                hands.onResults((res: any) => {
+                    const lm = res.multiHandLandmarks && res.multiHandLandmarks[0] ? res.multiHandLandmarks[0] : null;
+                    resolve(lm);
+                });
+                await hands.send({ image: offscreen });
+            });
         };
+        let landmarks: Landmark[] | null = await detect(2);
+        if (!landmarks) landmarks = await detect(1);
+        hands.close();
+        URL.revokeObjectURL(img.src);
+        if (!landmarks) return null;
+        try {
+            const result = calculateRingSizeFromLandmarks(landmarks);
+            return result;
+        } catch {
+            return null;
+        }
+    };
+    if (!canCallGemini) {
+        const landmarkResult = await tryLandmarksFallback();
+        if (landmarkResult) return landmarkResult;
+        throw new Error("Could not analyze the image. Please retake with better lighting and a clear view of the ring finger.");
     }
 
     try {
@@ -65,12 +103,8 @@ export const analyzeImage = async (
         return result;
 
     } catch (error: any) {
-        const fallbackSize = diameterToSize(18.1);
-        return {
-            size: fallbackSize!,
-            confidence: 25,
-            method: 'no_reference_fallback',
-            debugInfo: { fingerWidthPx: 0 }
-        };
+        const landmarkResult = await tryLandmarksFallback();
+        if (landmarkResult) return landmarkResult;
+        throw new Error(error?.message || "AI analysis failed. Please retake the photo with steady framing and good lighting.");
     }
 };

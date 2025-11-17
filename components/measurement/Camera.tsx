@@ -75,6 +75,13 @@ export const Camera = ({ onCapture, onCancel, method }: CameraProps) => {
     const [aiStatusText, setAiStatusText] = useState('Place your hand inside the outline.');
     const [aiHints, setAiHints] = useState<string[]>([]);
     const [placementState, setPlacementState] = useState<'too_close'|'too_far'|'angle_bad'|'spacing_bad'|'ok'>('too_far');
+    const [overlayConfidence, setOverlayConfidence] = useState(0);
+    const [overlayHanded, setOverlayHanded] = useState<'Left'|'Right'|'Unknown'>('Unknown');
+    const [overlayPalmCov, setOverlayPalmCov] = useState<number>(0);
+    const [liveDims, setLiveDims] = useState<null | { knuckle: number; mid: number; tip: number; cirKnuckle: number; cirMid: number; cirTip: number }>(null);
+    const hudLastRef = useRef<number>(0);
+    const landmarkBufferRef = useRef<Landmark[][]>([]);
+    const calibPxPerMmRef = useRef<number | null>(null);
 
 
     const isCardMethod = method === 'credit-card';
@@ -100,6 +107,10 @@ export const Camera = ({ onCapture, onCancel, method }: CameraProps) => {
         const ctx = canvas.getContext('2d');
         if(!ctx) return;
         filtersRef.current = createFilters(21);
+        const offscreen = document.createElement('canvas');
+        offscreen.width = video.videoWidth || video.clientWidth;
+        offscreen.height = video.videoHeight || video.clientHeight;
+        const octx = offscreen.getContext('2d');
 
         const onResults = (results: any) => {
             if (!isMounted) return;
@@ -111,7 +122,7 @@ export const Camera = ({ onCapture, onCancel, method }: CameraProps) => {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             const computed = getComputedStyle(video);
             const transformStr = computed.transform;
-            let mirroredX = currentFacingMode === 'user';
+            let mirroredX = false;
             let rotationRad = 0;
             if (transformStr && transformStr !== 'none') {
                 const m = transformStr.match(/matrix\(([^)]+)\)/);
@@ -138,11 +149,30 @@ export const Camera = ({ onCapture, onCancel, method }: CameraProps) => {
 
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
                 const landmarks: Landmark[] = results.multiHandLandmarks[0];
+                const handedness = (results.multiHandedness && results.multiHandedness[0] && results.multiHandedness[0].label) || 'Unknown';
+                setOverlayHanded(handedness);
                 
-                const tx = (x: number) => (viewTransformRef.current.mirroredX ? (1 - x) : x);
+                const tx = (x: number) => x;
                 const ty = (y: number) => y;
+                // multi-frame averaging for stability
+                const buf = landmarkBufferRef.current;
+                buf.push(landmarks);
+                if (buf.length > 5) buf.shift();
+                const agg: Landmark[] = landmarks.map(l => ({ x: l.x, y: l.y, z: l.z }));
+                for (let i=0;i<agg.length;i++) {
+                    let ax = 0, ay = 0, az = 0;
+                    for (const f of buf) { ax += f[i].x; ay += f[i].y; az += f[i].z; }
+                    agg[i].x = ax / buf.length; agg[i].y = ay / buf.length; agg[i].z = az / buf.length;
+                }
+                let varSum = 0;
+                for (let i=0;i<landmarks.length;i++) {
+                    const dxv = landmarks[i].x - agg[i].x;
+                    const dyv = landmarks[i].y - agg[i].y;
+                    varSum += dxv*dxv + dyv*dyv;
+                }
+                const varianceScore = Math.sqrt(varSum / landmarks.length);
                 let minX = 1.0, minY = 1.0, maxX = 0.0, maxY = 0.0;
-                for (const landmark of landmarks) {
+                for (const landmark of agg) {
                     const nx = tx(landmark.x);
                     const ny = ty(landmark.y);
                     minX = Math.min(minX, nx);
@@ -157,21 +187,21 @@ export const Camera = ({ onCapture, onCancel, method }: CameraProps) => {
                 const widthPx = handWidthNorm * canvas.width;
                 const heightPx = handHeightNorm * canvas.height;
 
-                const targetXMin = 0.30, targetXMax = 0.70;
-                const targetYMin = 0.25, targetYMax = 0.75;
+                const targetXMin = 0.28, targetXMax = 0.72;
+                const targetYMin = 0.20, targetYMax = 0.80;
                 const minWidthPx = canvas.width * 0.22;
                 const maxWidthPx = canvas.width * 0.45;
-                const wrist = landmarks[0];
-                const middleTip = landmarks[12];
-                const dx = (tx(middleTip.x) - tx(wrist.x)) * canvas.width;
-                const dy = (ty(middleTip.y) - ty(wrist.y)) * canvas.height;
+                const wrist = agg[0];
+                const middleTip = agg[12];
+                const dx = (middleTip.x - wrist.x) * canvas.width;
+                const dy = (middleTip.y - wrist.y) * canvas.height;
                 const angle = Math.abs(Math.atan2(dy, dx) * 180 / Math.PI);
                 const angleOk = angle > 60 && angle < 120;
                 const tipIdx = [4,8,12,16,20];
                 const mcpIdx = [2,5,9,13,17];
                 const centers = tipIdx.map((t,i) => {
-                    const tip = landmarks[t];
-                    const mcp = landmarks[mcpIdx[i]];
+                    const tip = agg[t];
+                    const mcp = agg[mcpIdx[i]];
                     const cx = (tip.x + mcp.x)/2;
                     const cy = (tip.y + mcp.y)/2;
                     const f = filtersRef.current!;
@@ -183,7 +213,7 @@ export const Camera = ({ onCapture, onCancel, method }: CameraProps) => {
                     return { x: up[0], y: up[1] };
                 });
                 const tips = tipIdx.map((t) => {
-                    const tip = landmarks[t];
+                    const tip = agg[t];
                     const f = filtersRef.current!;
                     const k = f.kalman[t];
                     const s = f.smooth[t];
@@ -201,7 +231,7 @@ export const Camera = ({ onCapture, onCancel, method }: CameraProps) => {
 
                 const inTarget = handCenterX > targetXMin && handCenterX < targetXMax && handCenterY > targetYMin && handCenterY < targetYMax;
                 const sizeOk = widthPx >= minWidthPx && widthPx <= maxWidthPx;
-                handInCorrectPosition = inTarget && sizeOk && angleOk && spacingOk;
+                handInCorrectPosition = inTarget && sizeOk && angleOk && spacingOk && varianceScore < 0.01;
 
                 if (!sizeOk) {
                     hints.push(widthPx < minWidthPx ? 'Move closer' : 'Move farther');
@@ -210,12 +240,15 @@ export const Camera = ({ onCapture, onCancel, method }: CameraProps) => {
                 if (!spacingOk) hints.push('Spread fingers slightly');
                 if (!inTarget) hints.push('Center hand in guide');
 
+                const mappedPreview = agg.map(l => ({ x: tx(l.x), y: ty(l.y), z: l.z }));
+                window.drawConnectors(ctx, mappedPreview, window.HAND_CONNECTIONS, { color: '#C9A668', lineWidth: 1 });
+                window.drawLandmarks(ctx, mappedPreview, { color: '#E8E8EA', lineWidth: 1, radius: 2 });
+
                 if (handInCorrectPosition) {
                     setAiStatusText('Great! Hold perfectly still.');
                     setPlacementState('ok');
-                    const mapped = landmarks.map(l => ({ x: tx(l.x), y: ty(l.y), z: l.z }));
+                    const mapped = agg.map(l => ({ x: tx(l.x), y: ty(l.y), z: l.z }));
                     window.drawConnectors(ctx, mapped, window.HAND_CONNECTIONS, { color: '#C9A668', lineWidth: 2 });
-                    window.drawLandmarks(ctx, mapped, { color: '#E8E8EA', lineWidth: 1, radius: 2, });
                     const labels = ['T','I','M','R','P'];
                     centers.forEach((c, idx) => {
                         ctx.fillStyle = '#C9A668';
@@ -228,10 +261,61 @@ export const Camera = ({ onCapture, onCancel, method }: CameraProps) => {
                         ctx.arc(pt.x * canvas.width, pt.y * canvas.height, 3, 0, Math.PI * 2);
                         ctx.fill();
                     });
+                    const PALM_INDEX = 5;
+                    const PALM_PINKY = 17;
+                    const RING_MCP = 13;
+                    const RING_PIP = 14;
+                    const RING_DIP = 15;
+                    const RING_TIP = 16;
+                const d = (a: any, b: any) => Math.hypot((a.x-b.x)*canvas.width, (a.y-b.y)*canvas.height);
+                const palmPoly = [agg[0], agg[5], agg[9], agg[13], agg[17]];
+                let area = 0;
+                for (let i = 0; i < palmPoly.length; i++) {
+                    const p1 = palmPoly[i];
+                    const p2 = palmPoly[(i+1) % palmPoly.length];
+                    area += (p1.x*canvas.width) * (p2.y*canvas.height) - (p2.x*canvas.width) * (p1.y*canvas.height);
+                }
+                area = Math.abs(area) / 2;
+                const cov = Math.max(0, Math.min(100, (area / (canvas.width * canvas.height)) * 100));
+                setOverlayPalmCov(cov);
+                    const palmPx = d(agg[PALM_INDEX], agg[PALM_PINKY]);
+                    let pixelToMm = palmPx > 0 ? 79.0 / palmPx : 0;
+                    if (calibPxPerMmRef.current) pixelToMm = 1 / calibPxPerMmRef.current;
+                    const lenKnucklePx = d(agg[RING_MCP], agg[RING_PIP]);
+                    const lenMidPx = d(agg[RING_PIP], agg[RING_DIP]);
+                    const lenTipPx = d(agg[RING_DIP], agg[RING_TIP]);
+                    const wrist3 = agg[0];
+                    const idxMcp = agg[5];
+                    const pnkMcp = agg[17];
+                    const v1 = { x: idxMcp.x - wrist3.x, y: idxMcp.y - wrist3.y, z: idxMcp.z - wrist3.z };
+                    const v2 = { x: pnkMcp.x - wrist3.x, y: pnkMcp.y - wrist3.y, z: pnkMcp.z - wrist3.z };
+                    const n = { x: v1.y*v2.z - v1.z*v2.y, y: v1.z*v2.x - v1.x*v2.z, z: v1.x*v2.y - v1.y*v2.x };
+                    const nz = Math.abs(n.z);
+                    const norm = Math.sqrt(n.x*n.x + n.y*n.y + n.z*n.z) || 1;
+                    const cosTilt = nz / norm;
+                    const tiltComp = 1 / Math.max(0.85, Math.min(1.0, cosTilt));
+                    const widthKnuckleMm = lenKnucklePx * 0.82 * pixelToMm * tiltComp;
+                    const widthMidMm = lenMidPx * 0.78 * pixelToMm * tiltComp;
+                    const rawTip = lenTipPx * 0.68 * pixelToMm * tiltComp;
+                    const widthTipMm = Math.min(widthMidMm * 0.95, rawTip);
+                    const now = performance.now();
+                    if (now - hudLastRef.current > 100) {
+                        hudLastRef.current = now;
+                        setLiveDims({ knuckle: widthKnuckleMm, mid: widthMidMm, tip: widthTipMm, cirKnuckle: widthKnuckleMm * Math.PI, cirMid: widthMidMm * Math.PI, cirTip: widthTipMm * Math.PI });
+                        const confBase = 50;
+                        const conf = Math.max(0, Math.min(100, confBase + (sizeOk ? 10 : 0) + (angleOk ? 15 : 0) + (spacingOk ? 15 : 0) + (inTarget ? 10 : 0)));
+                        setOverlayConfidence(conf);
+                    }
+                    ctx.fillStyle = '#FFFFFF';
+                    ctx.font = '12px monospace';
+                    ctx.fillText(`${widthKnuckleMm.toFixed(1)}mm`, tx(agg[RING_PIP].x)*canvas.width+6, ty(agg[RING_PIP].y)*canvas.height-6);
+                    ctx.fillText(`${widthMidMm.toFixed(1)}mm`, tx(agg[RING_DIP].x)*canvas.width+6, ty(agg[RING_DIP].y)*canvas.height-6);
+                    ctx.fillText(`${widthTipMm.toFixed(1)}mm`, tx(agg[RING_TIP].x)*canvas.width+6, ty(agg[RING_TIP].y)*canvas.height-6);
                 } else {
                     if (!sizeOk) setPlacementState(widthPx < minWidthPx ? 'too_far' : 'too_close');
                     else if (!angleOk) setPlacementState('angle_bad');
                     else if (!spacingOk) setPlacementState('spacing_bad');
+                    else if (varianceScore >= 0.0025) hints.push('Hold steady');
                 }
             }
             
@@ -239,7 +323,7 @@ export const Camera = ({ onCapture, onCancel, method }: CameraProps) => {
                 setAiStatusText('Place your hand inside the outline.');
             }
             
-            setIsHandDetected(handInCorrectPosition);
+            setIsHandDetected(!!(results.multiHandLandmarks && results.multiHandLandmarks.length > 0));
             setAiHints(hints);
             ctx.restore();
             const t1 = performance.now();
@@ -255,9 +339,28 @@ export const Camera = ({ onCapture, onCancel, method }: CameraProps) => {
         handsRef.current = hands;
 
         let frameRequest: number;
+        let lastCalibCheck = 0;
         async function detectionLoop() {
             if (isMounted && video.readyState >= 2) {
-                await hands.send({ image: video });
+                if (octx) {
+                    offscreen.width = video.videoWidth || video.clientWidth;
+                    offscreen.height = video.videoHeight || video.clientHeight;
+                    octx.filter = 'contrast(1.1) saturate(1.05) brightness(1.04)';
+                    octx.drawImage(video, 0, 0, offscreen.width, offscreen.height);
+                    await hands.send({ image: offscreen });
+                } else {
+                    await hands.send({ image: video });
+                }
+                const now = performance.now();
+                if (now - lastCalibCheck > 500) {
+                    lastCalibCheck = now;
+                    try {
+                        const g = await analyzeCameraFrame(video);
+                        if (g?.objectBox) {
+                            calibPxPerMmRef.current = g.objectBox.width > 0 ? g.objectBox.width / 85.6 : null;
+                        }
+                    } catch {}
+                }
             }
             if (isMounted) {
                 frameRequest = requestAnimationFrame(detectionLoop);
@@ -279,12 +382,34 @@ export const Camera = ({ onCapture, onCancel, method }: CameraProps) => {
 
         let animationFrameId: number;
         const video = videoRef.current;
+        const canvas = overlayCanvasRef.current;
+        const ctx = canvas ? canvas.getContext('2d') : null;
 
         const guidanceLoop = async () => {
             if (video.readyState >= 2) { 
                 try {
                     const newGuidance = await analyzeCameraFrame(video);
                     setGuidance(newGuidance);
+                    if (canvas && ctx) {
+                        canvas.width = video.videoWidth || video.clientWidth;
+                        canvas.height = video.videoHeight || video.clientHeight;
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        if (newGuidance.objectBox) {
+                            const b = newGuidance.objectBox;
+                            const pxToMm = 85.6 / b.width;
+                            const refPx = Math.max(12, Math.min(Math.round(pxToMm * 20), Math.floor(canvas.width * 0.2)));
+                            ctx.strokeStyle = '#C9A668';
+                            ctx.lineWidth = 2;
+                            ctx.strokeRect(b.x, b.y, b.width, b.height);
+                            ctx.fillStyle = '#C9A668';
+                            ctx.font = '12px monospace';
+                            ctx.fillText('85.6mm', b.x + b.width + 6, b.y + 12);
+                            ctx.strokeStyle = '#00E5FF';
+                            ctx.strokeRect(b.x + b.width + 12, b.y, refPx, refPx);
+                            ctx.fillStyle = '#00E5FF';
+                            ctx.fillText('20mm ref', b.x + b.width + 14, b.y + refPx + 14);
+                        }
+                    }
                 } catch (e) {
                     console.warn("Guidance analysis failed for frame:", e);
                 }
@@ -452,9 +577,9 @@ export const Camera = ({ onCapture, onCancel, method }: CameraProps) => {
 
             return (
                 <>
-                    <div className="absolute top-24 left-1/2 -translate-x-1/2 w-full max-w-sm p-2 pointer-events-none z-10">
-                        <div className={`text-center text-white bg-black/60 p-3 rounded-lg backdrop-blur-sm transition-all duration-300 ${isReady ? 'bg-success/20' : ''}`}>
-                            <p className="font-semibold">{guidance?.message || 'Align Hand & Card in Outlines'}</p>
+                    <div className="absolute top-3 left-3 pointer-events-none z-20">
+                        <div className={`text-white text-xs bg-black/40 px-3 py-2 rounded-lg shadow transition-all duration-300 ${isReady ? 'ring-1 ring-success/40' : ''}`}>
+                            {guidance?.message || 'Align Hand & Card in Outlines'}
                         </div>
                     </div>
                     <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 pointer-events-none p-8">
@@ -642,15 +767,28 @@ export const Camera = ({ onCapture, onCancel, method }: CameraProps) => {
                         </div>
                     )}
                     {isAiScanMethod && (
-                        <div className="absolute bottom-32 left-1/2 -translate-x-1/2 w-full max-w-md p-4 pointer-events-none z-10">
-                            <div className="text-white text-sm bg-black/60 p-4 rounded-lg backdrop-blur-sm grid grid-cols-2 gap-3">
-                                <FeedbackItem status={placementState==='ok' ? 'good' : (placementState==='too_far'?'warn':'warn')} goodText="Distance OK" warnText={placementState==='too_far'?'Too Far':'Too Close'} />
-                                <FeedbackItem status={placementState==='angle_bad' ? 'warn' : 'good'} goodText="Orientation OK" warnText="Rotate Palm" />
-                                <FeedbackItem status={placementState==='spacing_bad' ? 'warn' : 'good'} goodText="Finger Spacing OK" warnText="Spread Fingers" />
-                                <FeedbackItem status={isHandDetected ? 'good' : 'warn'} goodText="Centered" warnText="Center Hand" />
-                                <div className="col-span-2 text-xs text-silver-300 mt-1">Avg frame time: {perfRef.current.avgMs.toFixed(1)}ms</div>
+                        <>
+                          <div className="absolute sm:bottom-28 bottom-32 right-3 pointer-events-none z-20">
+                            <div className="bg-black/40 text-white text-xs px-3 py-2 rounded-lg shadow space-y-1">
+                              <div className="flex items-center gap-2"><span>Avg frame</span><span className="font-mono">{perfRef.current.avgMs.toFixed(1)}ms</span></div>
+                              <div className="flex items-center gap-2"><span>Confidence</span>
+                                <div className="w-24 h-1.5 bg-white/20 rounded"><div className="h-1.5 bg-success rounded" style={{ width: `${overlayConfidence}%` }}></div></div>
+                              </div>
+                              <div className="flex items-center gap-2"><span>Hand</span><span className="font-mono">{overlayHanded}</span></div>
+                              <div className="flex items-center gap-2"><span>Palm cov</span><span className="font-mono">{overlayPalmCov.toFixed(0)}%</span></div>
                             </div>
-                        </div>
+                          </div>
+                          {liveDims && (
+                            <div className="absolute sm:bottom-28 bottom-32 left-3 pointer-events-none z-20">
+                              <div className="bg-black/40 text-white text-xs px-3 py-2 rounded-lg shadow space-y-1">
+                                <div className="font-semibold">Measurements</div>
+                                <div>Knuckle: {liveDims.knuckle.toFixed(1)}mm · {liveDims.cirKnuckle.toFixed(1)}mm</div>
+                                <div>Mid: {liveDims.mid.toFixed(1)}mm · {liveDims.cirMid.toFixed(1)}mm</div>
+                                <div>Tip: {liveDims.tip.toFixed(1)}mm · {liveDims.cirTip.toFixed(1)}mm (excl nail)</div>
+                              </div>
+                            </div>
+                          )}
+                        </>
                     )}
                     {renderControls()}
                 </>
