@@ -84,7 +84,7 @@ export const Camera = ({ onCapture, onCancel, method }: CameraProps) => {
     const calibPxPerMmRef = useRef<number | null>(null);
 
 
-    const isCardMethod = method === 'credit-card';
+    const isCardMethod = method === 'reference-object';
     const isAiScanMethod = method === 'ai-scan';
 
     const stopStream = useCallback(() => {
@@ -686,8 +686,8 @@ export const Camera = ({ onCapture, onCancel, method }: CameraProps) => {
                     </div>
                 ) : (
                      <div className="space-y-3 text-silver-300">
-                        <p>1. Place a standard credit card on a flat, well-lit surface.</p>
-                        <p>2. Place your ring finger next to the card.</p>
+                        <p>1. Place a known-size reference object on a flat, well-lit surface.</p>
+                        <p>2. Place your ring finger next to the object.</p>
                         <p>3. Align both within the on-screen guides.</p>
                         <p>4. Follow the real-time feedback and tap to capture when ready!</p>
                     </div>
@@ -761,7 +761,7 @@ export const Camera = ({ onCapture, onCancel, method }: CameraProps) => {
                             <div className="text-white text-sm bg-black/60 p-4 rounded-lg backdrop-blur-sm grid grid-cols-2 gap-x-4 gap-y-3">
                                 <FeedbackItem status={guidance.lighting === 'good' ? 'good' : 'warn'} goodText="Lighting Good" warnText="Poor Lighting" />
                                 <FeedbackItem status={guidance.quality === 'good' ? 'good' : 'warn'} goodText="Hold Steady" warnText="Blurry Image" />
-                                <FeedbackItem status={guidance.objectDetected ? 'good' : 'warn'} goodText="Card Visible" warnText="Card Not Found" />
+                                <FeedbackItem status={guidance.objectDetected ? 'good' : 'warn'} goodText="Reference Object Visible" warnText="Object Not Found" />
                                 <FeedbackItem status={guidance.fingerDetected ? 'good' : 'warn'} goodText="Finger Visible" warnText="Finger Not Clear" />
                             </div>
                         </div>

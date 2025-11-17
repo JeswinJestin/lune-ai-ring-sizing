@@ -90,6 +90,41 @@ export const ResultsScreen = ({ result, onMeasureAgain, onTryOn, onViewRecommend
       doc.text(value, 60, startY);
       startY += 10;
     });
+    // Instructions Section
+    doc.setFontSize(16);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Guidelines for Accurate Measurement', 15, startY + 10);
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'normal');
+    const guidelines = [
+      'Use good lighting; avoid glare and shadows.',
+      'Hold the palm facing the camera; keep steady during capture.',
+      'For best accuracy, include a known-size reference object (card, coin, phone).',
+      'Retake if the app shows low confidence.',
+    ];
+    let gY = startY + 18;
+    guidelines.forEach((g) => {
+      doc.circle(18, gY - 2, 1, 'F');
+      doc.text(g, 22, gY);
+      gY += 7;
+    });
+    // Brand / Features Section
+    doc.setFontSize(16);
+    doc.setFont('helvetica', 'bold');
+    doc.text('About LUNE', 15, gY + 8);
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'normal');
+    const features = [
+      'AI-powered hand analysis and reference-object calibration.',
+      'Virtual AR try-on for visualizing rings.',
+      'Multiple sizing methods for flexibility.',
+    ];
+    let fY = gY + 16;
+    features.forEach((f) => {
+      doc.circle(18, fY - 2, 1, 'F');
+      doc.text(f, 22, fY);
+      fY += 7;
+    });
     doc.setFontSize(10);
     doc.setTextColor(150);
     doc.text('Thank you for using LUNE.', doc.internal.pageSize.getWidth() / 2, doc.internal.pageSize.getHeight() - 15, { align: 'center' });

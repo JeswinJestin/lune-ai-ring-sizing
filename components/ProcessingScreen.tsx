@@ -7,8 +7,8 @@ interface ProcessingScreenProps {
 }
 
 const analysisSteps: Record<SizingMethod, string[]> = {
-  'credit-card': [
-    "Detecting card edges...",
+  'reference-object': [
+    "Detecting reference object...",
     "Calibrating pixel-to-mm ratio...",
     "Isolating finger from background...",
     "Measuring finger width at knuckle...",

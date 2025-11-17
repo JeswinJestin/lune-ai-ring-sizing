@@ -1,6 +1,6 @@
 
 
-export type SizingMethod = 'credit-card' | 'existing-ring' | 'phone-screen' | 'printable' | 'ai-scan';
+export type SizingMethod = 'reference-object' | 'existing-ring' | 'phone-screen' | 'printable' | 'ai-scan';
 
 export interface RingSize {
   us: number | string;
