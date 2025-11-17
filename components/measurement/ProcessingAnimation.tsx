@@ -16,12 +16,20 @@ const tips = [
     "Ensure your ring can slide over your knuckle comfortably."
 ];
 
-export const ProcessingAnimation = () => {
+interface Props { progress?: number; message?: string }
+export const ProcessingAnimation = ({ progress: progressProp, message: messageProp }: Props) => {
     const [messageIndex, setMessageIndex] = useState(0);
     const [progress, setProgress] = useState(0);
     const randomTip = useMemo(() => tips[Math.floor(Math.random() * tips.length)], []);
 
     useEffect(() => {
+        if (typeof progressProp === 'number') {
+            setProgress(progressProp);
+        }
+    }, [progressProp]);
+
+    useEffect(() => {
+        if (typeof messageProp === 'string' && messageProp.length > 0) return;
         const messageInterval = setInterval(() => {
             setMessageIndex(prev => {
                 if (prev >= messages.length - 1) {
@@ -81,7 +89,7 @@ export const ProcessingAnimation = () => {
             
             <div className="h-10">
                 <h2 className="font-display text-4xl text-silver-100 mb-4 transition-opacity duration-500" key={messageIndex}>
-                    {messages[messageIndex]}
+                    {messageProp || messages[messageIndex]}
                 </h2>
             </div>
 

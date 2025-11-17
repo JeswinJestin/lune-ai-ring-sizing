@@ -6,7 +6,7 @@ import { LandingPage } from './components/LandingPage';
 import { MethodSelection } from './components/MethodSelection';
 import { ExistingRingSizer } from './components/ExistingRingSizer';
 import { PrintableSizer } from './components/PrintableSizer';
-import { ProcessingAnimation } from './components/measurement/ProcessingAnimation';
+import { ProcessingScreen } from './components/ProcessingScreen';
 import { ResultsScreen } from './components/ResultsScreen';
 import { ARTryOn } from './components/ARTryOn';
 import { Header } from './components/Header';
@@ -89,6 +89,24 @@ export const App = () => {
     window.scrollTo(0, 0);
   };
 
+  React.useEffect(() => {
+    if (appState === 'processing' && measurementResult) {
+      handleNavigate('results');
+    }
+  }, [appState, measurementResult]);
+
+  React.useEffect(() => {
+    if (appState === 'processing') {
+      const timeout = setTimeout(() => {
+        if (!measurementResult && !processingError) {
+          setProcessingError('Analysis is taking longer than expected. Please retry.');
+          handleNavigate('results');
+        }
+      }, 10000);
+      return () => clearTimeout(timeout);
+    }
+  }, [appState, measurementResult, processingError]);
+
   const handleMethodSelect = (method: SizingMethod) => {
     setCurrentMethod(method);
     if (method === 'reference-object' || method === 'ai-scan') {
@@ -100,12 +118,20 @@ export const App = () => {
     }
   };
 
+  const [processingProgress, setProcessingProgress] = React.useState<number>(0);
+  const [processingMessage, setProcessingMessage] = React.useState<string>('');
+  const [captureInFlight, setCaptureInFlight] = React.useState<boolean>(false);
+
   const handleCapture = async (imageBlob: Blob) => {
+    if (captureInFlight) return;
+    setCaptureInFlight(true);
     handleNavigate('processing');
     setProcessingError(null);
+    setProcessingProgress(0);
+    setProcessingMessage('Starting analysis');
     try {
       // Use the new, robust Gemini-powered analysis pipeline
-      const analysisResult = await analyzeImage(imageBlob);
+      const analysisResult = await analyzeImage(imageBlob, (p, msg) => { setProcessingProgress(p); setProcessingMessage(msg); });
 
       const result: MeasurementResult = {
         ringSize: analysisResult.size,
@@ -117,15 +143,18 @@ export const App = () => {
       };
       
       setMeasurementResult(result);
+      try { localStorage.setItem('lune_last_result', JSON.stringify(result)); } catch {}
       setTimeout(() => {
         handleNavigate('results');
-      }, 4000);
+      }, 1500);
 
     } catch (error: any) {
       console.error("Image processing failed:", error);
       setProcessingError(error.message || "An unknown error occurred during analysis.");
-      // Stay on processing page to show error and retry option
+      setProcessingMessage('Analysis failed');
+      handleNavigate('results');
     }
+    setCaptureInFlight(false);
   };
   
   const handleDiameterSubmit = async (diameter: number) => {
@@ -146,11 +175,11 @@ export const App = () => {
       });
        setTimeout(() => {
        handleNavigate('results');
-      }, 2500);
+      }, 1500);
     } catch (error: any) {
        console.error("Diameter processing failed:", error);
        setProcessingError(error.message);
-       // Stay on processing page to show error and retry option
+       handleNavigate('results');
     }
   };
 
@@ -208,7 +237,7 @@ export const App = () => {
       case 'measurement-capture': return <Camera onCapture={handleCapture} onCancel={handleBack} method={currentMethod} />;
       case 'sizer-existing-ring': return <ExistingRingSizer onSubmit={handleDiameterSubmit} onCancel={handleBack} />;
       case 'page-printable-sizer': return <PrintableSizer onBack={handleBack} />;
-      case 'processing': return <ProcessingAnimation />;
+      case 'processing': return <ProcessingScreen method={currentMethod} progress={processingProgress} message={processingMessage} />;
       case 'results': 
         if (processingError) {
           return (
@@ -218,6 +247,17 @@ export const App = () => {
               <Button onClick={() => handleNavigate('method-selection')}>Try Again</Button>
             </div>
           );
+        }
+        if (!measurementResult) {
+          try {
+            const raw = localStorage.getItem('lune_last_result');
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              if (parsed?.ringSize && parsed?.fingerDiameter_mm) {
+                setMeasurementResult(parsed);
+              }
+            }
+          } catch {}
         }
         return measurementResult ? <ResultsScreen result={measurementResult} onMeasureAgain={() => handleNavigate('method-selection')} onTryOn={() => handleNavigate('ar-try-on')} onViewRecommendations={() => handleNavigate('recommendations')} /> : <div className="text-center p-8">Loading results...</div>;
       case 'ar-try-on': return measurementResult ? <ARTryOn result={measurementResult} onBack={() => handleNavigate('results')} /> : null;
@@ -231,7 +271,7 @@ export const App = () => {
   };
 
   return (
-    <div className={`custom-cursor-region bg-midnight-600 min-h-screen flex flex-col ${isFullScreenPage ? '' : 'pt-20'}`}>
+    <div className={`bg-midnight-600 min-h-screen flex flex-col ${isFullScreenPage ? '' : 'pt-20'}`}>
       {!isFullScreenPage && <Header onNavigate={handleNavigate} />}
       {showBackButton && <FloatingBackButton onBack={handleBack} />}
       <main className="flex-grow flex items-center justify-center">

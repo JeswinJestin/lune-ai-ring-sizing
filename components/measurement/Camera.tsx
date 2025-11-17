@@ -331,6 +331,12 @@ export const Camera = ({ onCapture, onCancel, method }: CameraProps) => {
             const pr = perfRef.current;
             pr.frameCount += 1;
             pr.avgMs = pr.avgMs * 0.95 + ms * 0.05;
+            if (pr.frameCount % 30 === 0) {
+                try {
+                    const { recordTiming } = await import('../../lib/monitoring');
+                    recordTiming('live_frame_ms', pr.avgMs);
+                } catch {}
+            }
         };
 
         const hands = new window.Hands({ locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
@@ -342,14 +348,20 @@ export const Camera = ({ onCapture, onCancel, method }: CameraProps) => {
         let lastCalibCheck = 0;
         async function detectionLoop() {
             if (isMounted && video.readyState >= 2) {
-                if (octx) {
-                    offscreen.width = video.videoWidth || video.clientWidth;
-                    offscreen.height = video.videoHeight || video.clientHeight;
-                    octx.filter = 'contrast(1.1) saturate(1.05) brightness(1.04)';
-                    octx.drawImage(video, 0, 0, offscreen.width, offscreen.height);
-                    await hands.send({ image: offscreen });
-                } else {
-                    await hands.send({ image: video });
+                try {
+                    if (octx) {
+                        offscreen.width = video.videoWidth || video.clientWidth;
+                        offscreen.height = video.videoHeight || video.clientHeight;
+                        if (offscreen.width > 0 && offscreen.height > 0) {
+                            octx.filter = 'contrast(1.1) saturate(1.05) brightness(1.04)';
+                            octx.drawImage(video, 0, 0, offscreen.width, offscreen.height);
+                            await hands.send({ image: offscreen });
+                        }
+                    } else {
+                        await hands.send({ image: video });
+                    }
+                } catch (e) {
+                    console.warn('Hands detection aborted or failed:', e);
                 }
                 const now = performance.now();
                 if (now - lastCalibCheck > 500) {
@@ -535,8 +547,28 @@ export const Camera = ({ onCapture, onCancel, method }: CameraProps) => {
 
     const handleUsePhoto = useCallback(async () => {
         if (capturedImage) {
-            const blob = await (await fetch(capturedImage)).blob();
-            onCapture(blob);
+            try {
+                const res = await fetch(capturedImage);
+                const blob = await res.blob();
+                if (!blob || blob.size === 0) {
+                    // Fallback: decode data URL manually
+                    const m = capturedImage.match(/^data:(.*?);base64,(.*)$/);
+                    if (m) {
+                        const mime = m[1];
+                        const bytes = atob(m[2]);
+                        const buf = new Uint8Array(bytes.length);
+                        for (let i=0;i<bytes.length;i++) buf[i] = bytes.charCodeAt(i);
+                        const b2 = new Blob([buf], { type: mime || 'image/jpeg' });
+                        if (b2.size > 0) { onCapture(b2); return; }
+                    }
+                    alert('Image capture failed. Please retake the photo.');
+                    return;
+                }
+                onCapture(blob);
+            } catch (e) {
+                console.error('Failed to load captured image:', e);
+                alert('Failed to load captured image. Please retake the photo.');
+            }
         }
     }, [capturedImage, onCapture]);
     
