@@ -72,7 +72,7 @@ export const LandingPage = ({ onGetStarted }: LandingPageProps) => {
                 <Card>
                     <CreditCardIcon className="h-12 w-12 text-bronze-400 mb-3"/>
                     <h3 className="text-xl font-semibold text-silver-200 mb-2">AI-Powered Precision</h3>
-                    <p className="text-silver-400 text-sm">Achieve up to 99% accuracy using our advanced computer vision technology calibrated with any standard card.</p>
+                    <p className="text-silver-400 text-sm">Achieve high accuracy using our computer vision technology calibrated with a known-size reference object.</p>
                 </Card>
                 <Card>
                     <HandIcon className="h-12 w-12 text-bronze-400 mb-3"/>

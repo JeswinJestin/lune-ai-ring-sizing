@@ -126,7 +126,7 @@ export const analyzeCameraFrame = async (videoElement: HTMLVideoElement): Promis
     if (guidance.lighting === 'dark') guidance.message = "💡 More lighting needed";
     else if (guidance.lighting === 'bright') guidance.message = "☀️ Too bright, find some shade";
     else if (!guidance.fingerDetected) guidance.message = "✋ Position ring finger in frame";
-    else if (!guidance.objectDetected) guidance.message = "Place a reference card next to your finger";
+    else if (!guidance.objectDetected) guidance.message = "Place a reference object next to your finger";
     else guidance.message = "✅ Perfect! Tap to capture";
 
     return guidance;

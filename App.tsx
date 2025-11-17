@@ -91,7 +91,7 @@ export const App = () => {
 
   const handleMethodSelect = (method: SizingMethod) => {
     setCurrentMethod(method);
-    if (method === 'credit-card' || method === 'ai-scan') {
+    if (method === 'reference-object' || method === 'ai-scan') {
       handleNavigate('measurement-capture');
     } else if (method === 'existing-ring') {
       handleNavigate('sizer-existing-ring');
@@ -124,7 +124,7 @@ export const App = () => {
     } catch (error: any) {
       console.error("Image processing failed:", error);
       setProcessingError(error.message || "An unknown error occurred during analysis.");
-      handleNavigate('results');
+      // Stay on processing page to show error and retry option
     }
   };
   
@@ -145,12 +145,12 @@ export const App = () => {
         imagePreviewUrl: '',
       });
        setTimeout(() => {
-        handleNavigate('results');
+       handleNavigate('results');
       }, 2500);
     } catch (error: any) {
        console.error("Diameter processing failed:", error);
        setProcessingError(error.message);
-       handleNavigate('results');
+       // Stay on processing page to show error and retry option
     }
   };
 

@@ -38,7 +38,7 @@ export const FeaturesPage = ({ onGetStarted }: FeaturesPageProps) => {
                         <CreditCardIcon className="w-7 h-7" />
                     </div>
                     <h3 className="font-display text-2xl text-silver-100 mb-2">Multiple Methods</h3>
-                    <p className="text-silver-400">Start with our highly accurate credit card method. More innovative methods, including phone screen calibration and pure hand analysis, are coming soon.</p>
+                    <p className="text-silver-400">Start with our calibrated reference object method. More innovative methods, including phone screen calibration and pure hand analysis, are coming soon.</p>
                 </div>
             </Card>
 
