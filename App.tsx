@@ -113,6 +113,7 @@ export const App = () => {
         fingerDiameter_mm: analysisResult.size.diameter_mm,
         fingerCircumference_mm: analysisResult.size.circumference_mm,
         imagePreviewUrl: URL.createObjectURL(imageBlob),
+        zones: analysisResult.zones,
       };
       
       setMeasurementResult(result);

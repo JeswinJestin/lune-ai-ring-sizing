@@ -6,11 +6,12 @@ let guidanceCanvas: HTMLCanvasElement | null = null;
 const ANALYSIS_WIDTH = 320;
 
 // Simplified contour finding and analysis for real-time feedback
-const quickAnalyzeFrameObjects = (imageData: ImageData): { hasCardLikeObject: boolean; hasCoinLikeObject: boolean } => {
+const quickAnalyzeFrameObjects = (imageData: ImageData): { hasCardLikeObject: boolean; hasCoinLikeObject: boolean; box?: { x: number; y: number; width: number; height: number } } => {
     const { data, width, height } = imageData;
     const visited = new Uint8Array(width * height);
     let hasCardLikeObject = false;
     let hasCoinLikeObject = false;
+    let box: { x: number; y: number; width: number; height: number } | undefined;
 
     // Simplified thresholding
     for (let i = 0; i < data.length; i += 4) {
@@ -52,9 +53,10 @@ const quickAnalyzeFrameObjects = (imageData: ImageData): { hasCardLikeObject: bo
         if (aspectRatio > 0.8 && aspectRatio < 1.2) {
             hasCoinLikeObject = true;
         }
+        box = { x: minX, y: minY, width: boxWidth, height: boxHeight };
     }
     
-    return { hasCardLikeObject, hasCoinLikeObject };
+    return { hasCardLikeObject, hasCoinLikeObject, box };
 };
 
 const traceBoundary = (startX: number, startY: number, width: number, height: number, data: Uint8ClampedArray, visited: Uint8Array): Contour => {
@@ -107,7 +109,7 @@ export const analyzeCameraFrame = async (videoElement: HTMLVideoElement): Promis
         }
     }
     
-    const { hasCardLikeObject } = quickAnalyzeFrameObjects(imageData);
+    const { hasCardLikeObject, box } = quickAnalyzeFrameObjects(imageData);
     const pixelCount = data.length / 4 / 8;
     const avgBrightness = totalBrightness / pixelCount;
     
@@ -117,13 +119,14 @@ export const analyzeCameraFrame = async (videoElement: HTMLVideoElement): Promis
         objectDetected: hasCardLikeObject,
         fingerDetected: (skinPixels / pixelCount) > 0.1,
         distance: 'good',
-        message: ''
+        message: '',
+        objectBox: box ? { x: box.x, y: box.y, width: box.width, height: box.height } : undefined
     };
     
     if (guidance.lighting === 'dark') guidance.message = "💡 More lighting needed";
     else if (guidance.lighting === 'bright') guidance.message = "☀️ Too bright, find some shade";
     else if (!guidance.fingerDetected) guidance.message = "✋ Position ring finger in frame";
-    else if (!guidance.objectDetected) guidance.message = " प्लेसहोल्डर: एक संदर्भ वस्तु रखें";
+    else if (!guidance.objectDetected) guidance.message = "Place a reference card next to your finger";
     else guidance.message = "✅ Perfect! Tap to capture";
 
     return guidance;
